@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Boardroom Calendar</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #1e1e2e; color: #cdd6f4;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  #app { max-width: 900px; margin: 0 auto; padding: 24px; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  h1 { font-size: 26px; font-weight: 600; color: #fff; margin: 0; }
+  #status { font-size: 13px; color: #a6adc8; text-align: right; }
+  #range { font-size: 14px; color: #cdd6f4; margin: 6px 0 18px; }
+  .day {
+    background: #25253a; border-radius: 10px; padding: 12px 16px; margin-bottom: 10px;
+  }
+  .day.today { background: #313244; }
+  .day-title { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 6px; }
+  .event { display: flex; gap: 12px; padding: 3px 0; font-size: 14px; }
+  .event-time { color: #89b4fa; font-weight: 600; width: 110px; flex-shrink: 0; }
+  .event-subject { color: #cdd6f4; }
+  .empty { color: #a6adc8; font-style: italic; font-size: 13px; }
+  #signin {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 70vh; gap: 16px; text-align: center;
+  }
+  #signin button {
+    background: #313244; color: #fff; border: none; border-radius: 8px;
+    padding: 14px 28px; font-size: 16px; cursor: pointer;
+  }
+  #signin button:active { transform: scale(0.98); }
+  #error { color: #f38ba8; font-size: 14px; white-space: pre-wrap; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="signin" style="display:none;">
+    <h1 id="signin-room"></h1>
+    <p>Sign in once with the room's account. The display will then refresh automatically without needing to sign in again.</p>
+    <button id="signin-btn">Sign in</button>
+    <div id="error"></div>
+  </div>
+
+  <div id="main" style="display:none;">
+    <header>
+      <h1 id="room-name"></h1>
+      <div id="status">Loading...</div>
+    </header>
+    <div id="range"></div>
+    <div id="days"></div>
+    <div id="error"></div>
+  </div>
+</div>
+
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="config.js"></script>
+<script>
+const CFG = window.CONFIG;
+
+const msalConfig = {
+  auth: {
+    clientId: CFG.clientId,
+    authority: `https://login.microsoftonline.com/${CFG.tenantId}`,
+    redirectUri: window.location.origin + window.location.pathname,
+  },
+  cache: {
+    cacheLocation: "localStorage",
+    storeAuthStateInCookie: false,
+  },
+};
+
+const msalInstance = new msal.PublicClientApplication(msalConfig);
+const scopes = [CFG.graphScope];
+
+document.getElementById("signin-room").textContent = CFG.roomName;
+document.getElementById("room-name").textContent = CFG.roomName;
+
+function showError(msg) {
+  document.querySelectorAll("#error").forEach(el => el.textContent = msg);
+}
+
+function weekdaysWindow(count) {
+  const days = [];
+  let cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  while (days.length < count) {
+    const dow = cursor.getDay(); // 0=Sun ... 6=Sat
+    if (dow !== 0 && dow !== 6) days.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
+function isoDate(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+async function getToken() {
+  const account = msalInstance.getAllAccounts()[0];
+  if (!account) throw new Error("Not signed in");
+  try {
+    const result = await msalInstance.acquireTokenSilent({ scopes, account });
+    return result.accessToken;
+  } catch (e) {
+    // Silent renewal failed (e.g. session too old) - fall back to an
+    // interactive prompt. On a kiosk this should be rare if the display
+    // stays powered on and refreshes regularly.
+    const result = await msalInstance.acquireTokenPopup({ scopes });
+    return result.accessToken;
+  }
+}
+
+async function fetchEvents(token) {
+  const days = weekdaysWindow(CFG.weekdaysToShow);
+  const start = days[0];
+  const end = new Date(days[days.length - 1]);
+  end.setDate(end.getDate() + 1);
+
+  const base = CFG.roomEmail === "me" ? "/me" : `/users/${CFG.roomEmail}`;
+  const url = new URL(`https://graph.microsoft.com/v1.0${base}/calendarView`);
+  url.searchParams.set("startDateTime", start.toISOString());
+  url.searchParams.set("endDateTime", end.toISOString());
+  url.searchParams.set("$orderby", "start/dateTime");
+  url.searchParams.set("$select", "subject,start,end,organizer,isCancelled");
+  url.searchParams.set("$top", "100");
+
+  const resp = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Prefer: `outlook.timezone="${CFG.timezone}"`,
+    },
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Graph API error ${resp.status}: ${body}`);
+  }
+  const data = await resp.json();
+  const events = (data.value || []).filter(e => !e.isCancelled);
+  return { days, events };
+}
+
+function groupByDay(events) {
+  const map = {};
+  for (const e of events) {
+    const key = e.start.dateTime.slice(0, 10);
+    (map[key] = map[key] || []).push(e);
+  }
+  return map;
+}
+
+function render(days, eventsByDay) {
+  const todayKey = isoDate(new Date());
+  const container = document.getElementById("days");
+  container.innerHTML = "";
+
+  const first = days[0], last = days[days.length - 1];
+  document.getElementById("range").textContent =
+    `Next ${days.length} weekdays: ${first.toDateString()} - ${last.toDateString()}`;
+
+  for (const day of days) {
+    const key = isoDate(day);
+    const dayEvents = (eventsByDay[key] || []).sort(
+      (a, b) => a.start.dateTime.localeCompare(b.start.dateTime)
+    );
+
+    const div = document.createElement("div");
+    div.className = "day" + (key === todayKey ? " today" : "");
+
+    const title = document.createElement("div");
+    title.className = "day-title";
+    title.textContent = day.toLocaleDateString(undefined, {
+      weekday: "long", day: "2-digit", month: "long",
+    }) + (key === todayKey ? "  (Today)" : "");
+    div.appendChild(title);
+
+    if (dayEvents.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "No bookings";
+      div.appendChild(empty);
+    } else {
+      for (const e of dayEvents) {
+        const row = document.createElement("div");
+        row.className = "event";
+        const startT = new Date(e.start.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const endT = new Date(e.end.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const organizer = (e.organizer && e.organizer.emailAddress && e.organizer.emailAddress.name) || "Unknown";
+        row.innerHTML = `<span class="event-time">${startT} - ${endT}</span>` +
+          `<span class="event-subject">${(e.subject || "(No subject)")} - ${organizer}</span>`;
+        div.appendChild(row);
+      }
+    }
+    container.appendChild(div);
+  }
+}
+
+async function refresh() {
+  document.getElementById("status").textContent = "Refreshing...";
+  showError("");
+  try {
+    const token = await getToken();
+    const { days, events } = await fetchEvents(token);
+    render(days, groupByDay(events));
+    document.getElementById("status").textContent =
+      "Last updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById("status").textContent = "Error";
+    showError("Unable to load calendar:\n" + e.message);
+  } finally {
+    setTimeout(refresh, CFG.refreshMinutes * 60 * 1000);
+  }
+}
+
+async function init() {
+  await msalInstance.handleRedirectPromise();
+  const account = msalInstance.getAllAccounts()[0];
+  if (account) {
+    document.getElementById("main").style.display = "block";
+    refresh();
+  } else {
+    document.getElementById("signin").style.display = "flex";
+  }
+}
+
+document.getElementById("signin-btn").addEventListener("click", async () => {
+  try {
+    await msalInstance.loginPopup({ scopes });
+    document.getElementById("signin").style.display = "none";
+    document.getElementById("main").style.display = "block";
+    refresh();
+  } catch (e) {
+    showError("Sign-in failed:\n" + e.message);
+  }
+});
+
+init();
+</script>
+</body>
+</html>
