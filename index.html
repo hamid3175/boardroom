@@ -10,24 +10,53 @@
     background: #1e1e2e; color: #cdd6f4;
     font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
     -webkit-user-select: none; user-select: none;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
   }
-  #app { max-width: 900px; margin: 0 auto; padding: 24px; }
+  #bg-overlay {
+    position: fixed; inset: 0; z-index: 0;
+    background: rgba(30, 30, 46, 0.72); /* darkens any background image so text stays readable */
+    pointer-events: none;
+  }
+  #app { max-width: 1100px; margin: 0 auto; padding: 40px 32px; position: relative; z-index: 1; }
   header {
     display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
-  h1 { font-size: 26px; font-weight: 600; color: #fff; margin: 0; }
-  #status { font-size: 13px; color: #a6adc8; text-align: right; }
-  #range { font-size: 14px; color: #cdd6f4; margin: 6px 0 18px; }
+  #header-left { display: flex; align-items: center; gap: 16px; }
+  #logo { height: 56px; width: auto; display: none; border-radius: 6px; }
+  h1 { font-size: 34px; font-weight: 600; color: #fff; margin: 0; }
+  #header-right { display: flex; align-items: center; gap: 12px; }
+  #status { font-size: 15px; color: #a6adc8; }
+  #refresh-btn {
+    background: #313244; color: #fff; border: none; border-radius: 6px;
+    padding: 8px 18px; font-size: 15px; cursor: pointer;
+  }
+  #refresh-btn:active { transform: scale(0.97); }
+  #refresh-btn:disabled { opacity: 0.5; cursor: default; }
+  #range { font-size: 17px; color: #cdd6f4; margin: 10px 0 26px; text-align: center; }
   .day {
-    background: #25253a; border-radius: 10px; padding: 12px 16px; margin-bottom: 10px;
+    background: #25253a; border-radius: 12px; padding: 16px 20px; margin-bottom: 14px;
+    border: 2px solid transparent;
   }
-  .day.today { background: #313244; }
-  .day-title { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 6px; }
-  .event { display: flex; gap: 12px; padding: 3px 0; font-size: 14px; }
-  .event-time { color: #89b4fa; font-weight: 600; width: 110px; flex-shrink: 0; }
+  .day.today {
+    background: #313244;
+    padding: 30px 32px;
+    border-color: #89b4fa;
+    box-shadow: 0 0 0 1px rgba(137, 180, 250, 0.3), 0 8px 28px rgba(0, 0, 0, 0.4);
+    transform: scale(1.02);
+  }
+  .day-title { font-size: 19px; font-weight: 600; color: #fff; margin-bottom: 8px; }
+  .day.today .day-title { font-size: 30px; margin-bottom: 14px; }
+  .event { display: flex; gap: 14px; padding: 4px 0; font-size: 17px; }
+  .day.today .event { font-size: 24px; padding: 9px 0; }
+  .event-time { color: #89b4fa; font-weight: 600; width: 130px; flex-shrink: 0; }
+  .day.today .event-time { width: 170px; }
   .event-subject { color: #cdd6f4; }
-  .empty { color: #a6adc8; font-style: italic; font-size: 13px; }
+  .empty { color: #a6adc8; font-style: italic; font-size: 16px; }
+  .day.today .empty { font-size: 22px; }
   #signin {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     height: 70vh; gap: 16px; text-align: center;
@@ -41,6 +70,7 @@
 </style>
 </head>
 <body>
+<div id="bg-overlay"></div>
 <div id="app">
   <div id="signin" style="display:none;">
     <h1 id="signin-room"></h1>
@@ -51,8 +81,14 @@
 
   <div id="main" style="display:none;">
     <header>
-      <h1 id="room-name"></h1>
-      <div id="status">Loading...</div>
+      <div id="header-left">
+        <img id="logo" src="" alt="" />
+        <h1 id="room-name"></h1>
+      </div>
+      <div id="header-right">
+        <div id="status">Loading...</div>
+        <button id="refresh-btn">Refresh</button>
+      </div>
     </header>
     <div id="range"></div>
     <div id="days"></div>
@@ -60,7 +96,7 @@
   </div>
 </div>
 
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js"></script>
 <script src="config.js"></script>
 <script>
 const CFG = window.CONFIG;
@@ -83,6 +119,16 @@ const scopes = [CFG.graphScope];
 document.getElementById("signin-room").textContent = CFG.roomName;
 document.getElementById("room-name").textContent = CFG.roomName;
 
+if (CFG.backgroundImageUrl) {
+  document.body.style.backgroundImage = `url("${CFG.backgroundImageUrl}")`;
+}
+if (CFG.logoUrl) {
+  const logo = document.getElementById("logo");
+  logo.src = CFG.logoUrl;
+  logo.alt = CFG.roomName + " logo";
+  logo.style.display = "block";
+}
+
 function showError(msg) {
   document.querySelectorAll("#error").forEach(el => el.textContent = msg);
 }
@@ -99,8 +145,11 @@ function weekdaysWindow(count) {
   return days;
 }
 
-function isoDate(d) {
-  return d.toISOString().slice(0, 10);
+function localDateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 async function getToken() {
@@ -111,10 +160,12 @@ async function getToken() {
     return result.accessToken;
   } catch (e) {
     // Silent renewal failed (e.g. session too old) - fall back to an
-    // interactive prompt. On a kiosk this should be rare if the display
-    // stays powered on and refreshes regularly.
-    const result = await msalInstance.acquireTokenPopup({ scopes });
-    return result.accessToken;
+    // interactive prompt via redirect (not popup - GitHub Pages and many
+    // hosts send a Cross-Origin-Opener-Policy header that breaks popup
+    // flows). This navigates away and back; refresh() picks up where it
+    // left off once the page reloads.
+    await msalInstance.acquireTokenRedirect({ scopes });
+    return null; // unreachable - acquireTokenRedirect navigates away
   }
 }
 
@@ -129,7 +180,7 @@ async function fetchEvents(token) {
   url.searchParams.set("startDateTime", start.toISOString());
   url.searchParams.set("endDateTime", end.toISOString());
   url.searchParams.set("$orderby", "start/dateTime");
-  url.searchParams.set("$select", "subject,start,end,organizer,isCancelled");
+  url.searchParams.set("$select", "start,end,organizer,isCancelled");
   url.searchParams.set("$top", "100");
 
   const resp = await fetch(url, {
@@ -157,7 +208,7 @@ function groupByDay(events) {
 }
 
 function render(days, eventsByDay) {
-  const todayKey = isoDate(new Date());
+  const todayKey = localDateKey(new Date());
   const container = document.getElementById("days");
   container.innerHTML = "";
 
@@ -166,7 +217,7 @@ function render(days, eventsByDay) {
     `Next ${days.length} weekdays: ${first.toDateString()} - ${last.toDateString()}`;
 
   for (const day of days) {
-    const key = isoDate(day);
+    const key = localDateKey(day);
     const dayEvents = (eventsByDay[key] || []).sort(
       (a, b) => a.start.dateTime.localeCompare(b.start.dateTime)
     );
@@ -194,7 +245,7 @@ function render(days, eventsByDay) {
         const endT = new Date(e.end.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         const organizer = (e.organizer && e.organizer.emailAddress && e.organizer.emailAddress.name) || "Unknown";
         row.innerHTML = `<span class="event-time">${startT} - ${endT}</span>` +
-          `<span class="event-subject">${(e.subject || "(No subject)")} - ${organizer}</span>`;
+          `<span class="event-subject">${organizer}</span>`;
         div.appendChild(row);
       }
     }
@@ -202,7 +253,12 @@ function render(days, eventsByDay) {
   }
 }
 
+let refreshTimer = null;
+
 async function refresh() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  const btn = document.getElementById("refresh-btn");
+  btn.disabled = true;
   document.getElementById("status").textContent = "Refreshing...";
   showError("");
   try {
@@ -215,7 +271,8 @@ async function refresh() {
     document.getElementById("status").textContent = "Error";
     showError("Unable to load calendar:\n" + e.message);
   } finally {
-    setTimeout(refresh, CFG.refreshMinutes * 60 * 1000);
+    btn.disabled = false;
+    refreshTimer = setTimeout(refresh, CFG.refreshMinutes * 60 * 1000);
   }
 }
 
@@ -230,15 +287,17 @@ async function init() {
   }
 }
 
-document.getElementById("signin-btn").addEventListener("click", async () => {
-  try {
-    await msalInstance.loginPopup({ scopes });
-    document.getElementById("signin").style.display = "none";
-    document.getElementById("main").style.display = "block";
-    refresh();
-  } catch (e) {
+document.getElementById("signin-btn").addEventListener("click", () => {
+  // loginRedirect navigates the whole page to Microsoft's sign-in page and
+  // back - init() picks up the result via handleRedirectPromise() on the
+  // next load, so nothing more happens here.
+  msalInstance.loginRedirect({ scopes }).catch((e) => {
     showError("Sign-in failed:\n" + e.message);
-  }
+  });
+});
+
+document.getElementById("refresh-btn").addEventListener("click", () => {
+  refresh();
 });
 
 init();
