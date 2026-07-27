@@ -97,7 +97,12 @@
 </div>
 
 <script src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js"></script>
-<script src="config.js"></script>
+<script>
+  // Cache-bust config.js on every load - this file gets edited often, and
+  // browsers/CDNs otherwise cache it aggressively, so changes wouldn't show
+  // up on the tablet until the cache happened to expire.
+  document.write('<script src="config.js?v=' + Date.now() + '"><\/script>');
+</script>
 <script>
 const CFG = window.CONFIG;
 
