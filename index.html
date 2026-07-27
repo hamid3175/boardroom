@@ -52,7 +52,7 @@
   .day.today .day-title { font-size: 32px; margin-bottom: 16px; }
   .event { display: flex; gap: 16px; padding: 6px 0; font-size: 20px; line-height: 1.3; }
   .day.today .event { font-size: 25px; padding: 10px 0; }
-  .event-time { color: #89b4fa; font-weight: 600; width: 150px; flex-shrink: 0; }
+  .event-time { color: #89b4fa; font-weight: 600; width: 150px; flex-shrink: 0; white-space: nowrap; }
   .day.today .event-time { width: 175px; }
   .event-subject { color: #ffffff; }
   .empty { color: #b8bfd6; font-style: italic; font-size: 18px; }
@@ -246,8 +246,8 @@ function render(days, eventsByDay) {
       for (const e of dayEvents) {
         const row = document.createElement("div");
         row.className = "event";
-        const startT = new Date(e.start.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        const endT = new Date(e.end.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const startT = new Date(e.start.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+        const endT = new Date(e.end.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
         const organizer = (e.organizer && e.organizer.emailAddress && e.organizer.emailAddress.name) || "Unknown";
         row.innerHTML = `<span class="event-time">${startT} - ${endT}</span>` +
           `<span class="event-subject">${organizer}</span>`;
